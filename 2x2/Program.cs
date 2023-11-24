@@ -264,6 +264,12 @@ namespace _2x2
                             nextPT = nextPT.PreviousPositionTree;
                         }
                         cubeSequences.Add(nextSequence);
+
+                        //validate the sequence works. This is not strictly necessary, but validates the sequences chosen are valid.
+                        if (!nextSequence.Validate(start, finish, working, working2, colorValues))
+                        {
+                            throw new InvalidOperationException("Failed to validate sequence.");
+                        }
                     }
                     cubeSequences.Sort(); //sort the sequences
 
@@ -277,54 +283,57 @@ namespace _2x2
                     int? currentBest = null;
                     foreach (var nextCubeSequence in cubeSequences)
                     {
-                        Dictionary<CubeFace, int> faceCounts = new Dictionary<CubeFace, int>();
-                        foreach (FaceRotation fr in nextCubeSequence.Rotations)
+                        if (!countOnly)
                         {
-                            if (!faceCounts.TryGetValue(fr.Face, out int currentValue))
+                            Dictionary<CubeFace, int> faceCounts = new Dictionary<CubeFace, int>();
+                            foreach (FaceRotation fr in nextCubeSequence.Rotations)
                             {
-                                currentValue = 0;
+                                if (!faceCounts.TryGetValue(fr.Face, out int currentValue))
+                                {
+                                    currentValue = 0;
+                                }
+                                faceCounts[fr.Face] = currentValue + 1;
                             }
-                            faceCounts[fr.Face] = currentValue + 1;
-                        }
-                        List<int> faceCountsValues = new List<int>();
-                        foreach (var next in faceCounts)
-                        {
-                            faceCountsValues.Add(next.Value);
-                        }
-                        int iNextSequenceMetric = 0;
-                        if (faceCountsValues.Count > 2)
-                        {
-                            faceCountsValues.Sort();
-                            faceCountsValues.Reverse();
-                            for (int i = 2; i < faceCountsValues.Count; i++)
+                            List<int> faceCountsValues = new List<int>();
+                            foreach (var next in faceCounts)
                             {
-                                iNextSequenceMetric += faceCountsValues[i];
+                                faceCountsValues.Add(next.Value);
                             }
-                        }
-                        bool newBest = false;
-                        if (currentBest.HasValue)
-                        {
-                            if (currentBest.Value < iNextSequenceMetric)
+                            int iNextSequenceMetric = 0;
+                            if (faceCountsValues.Count > 2)
                             {
-                                continue; //skip this sequence
+                                faceCountsValues.Sort();
+                                faceCountsValues.Reverse();
+                                for (int i = 2; i < faceCountsValues.Count; i++)
+                                {
+                                    iNextSequenceMetric += faceCountsValues[i];
+                                }
                             }
-                            else if (iNextSequenceMetric < currentBest.Value)
+                            bool newBest = false;
+                            if (currentBest.HasValue)
+                            {
+                                if (currentBest.Value < iNextSequenceMetric)
+                                {
+                                    continue; //skip this sequence
+                                }
+                                else if (iNextSequenceMetric < currentBest.Value)
+                                {
+                                    newBest = true;
+                                }
+                            }
+                            else
                             {
                                 newBest = true;
                             }
-                        }
-                        else
-                        {
-                            newBest = true;
-                        }
-                        if (newBest)
-                        {
-                            currentBest = iNextSequenceMetric;
-                            sequencesSet.Clear();
-                            allStrings.Clear();
-                            positionCharacters.Clear();
-                            positionText.Clear();
-                            positionText[startTransformationNumber] = "0";
+                            if (newBest)
+                            {
+                                currentBest = iNextSequenceMetric;
+                                sequencesSet.Clear();
+                                allStrings.Clear();
+                                positionCharacters.Clear();
+                                positionText.Clear();
+                                positionText[startTransformationNumber] = "0";
+                            }
                         }
 
                         //eliminate duplicate sequences if they are mirrors of an already processed sequence
@@ -641,6 +650,22 @@ namespace _2x2
                 }
                 return iRotationCountA.CompareTo(iRotationCountB);
             }
+
+            /// <summary>
+            /// validates applying the sequence yields the expected result
+            /// </summary>
+            /// <param name="start">starting position. The state of this cube is changed to try to get to the finish state.</param>
+            /// <param name="finish">finishing position</param>
+            /// <returns>true if successfully validated, false otherwise</returns>
+            public bool Validate(TwoByTwo start, TwoByTwo finish, TwoByTwo working, TwoByTwo working2, Dictionary<FaceColor, BigInteger> colorValues)
+            {
+                working.SetFromOtherCube(start);
+                foreach (FaceRotation fr in Rotations)
+                {
+                    working.PerformFaceRotation(fr);
+                }
+                return working.GetLowestTransformationNumber(working2, colorValues, null) == finish.GetLowestTransformationNumber(working2, colorValues, null);
+            }
         }
 
         private static void ProcessNextRotation(TwoByTwo rotation, TwoByTwo working, Dictionary<FaceColor, BigInteger> colorValues, Dictionary<BigInteger, int> finalPositions, Dictionary<BigInteger, int> currentPositions, int currentPriority, PriorityQueue<CubePriorityNode, int> pq, List<Dictionary<FaceColor, FaceColor>> colorFlips)
@@ -709,7 +734,7 @@ namespace _2x2
             return cNext;
         }
 
-        public IEnumerable<BigInteger> GetTransformationNumbers(TwoByTwo? working, Dictionary<FaceColor, BigInteger> Values, List<Dictionary<FaceColor, FaceColor>> colorFlips)
+        public IEnumerable<BigInteger> GetTransformationNumbers(TwoByTwo? working, Dictionary<FaceColor, BigInteger> Values, List<Dictionary<FaceColor, FaceColor>>? colorFlips)
         {
             if (working == null)
             {
@@ -720,79 +745,101 @@ namespace _2x2
                 working.SetFromOtherCube(this);
             }
 
-            foreach (var nextColorFlip in colorFlips)
+            if (colorFlips == null) //just the null color flip
             {
-                working.PerformColorFlip(nextColorFlip);
-
-                yield return working.GetTransformationNumber(Values);
-
-                if (ALLOW_CUBE_ROTATION_TRANSFORMATIONS)
+                foreach (BigInteger next in working.GetTransformationNumbers(Values))
                 {
-                    CubeFaceRotation rightAntiClockwise = CubeFaceRotation.GetRotationForAxisAndDirection(CubeAxis.Right, -1);
-                    CubeFaceRotation frontClockwise = CubeFaceRotation.GetRotationForAxisAndDirection(CubeAxis.Front, 1);
-                    CubeFaceRotation frontAntiClockwise = CubeFaceRotation.GetRotationForAxisAndDirection(CubeAxis.Front, -1);
-
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(frontAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(frontAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(frontClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(frontClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(frontAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
-                    working.PerformCubeFaceRotation(rightAntiClockwise);
-                    yield return working.GetTransformationNumber(Values);
+                    yield return next;
+                }
+            }
+            else
+            {
+                foreach (var nextColorFlip in colorFlips)
+                {
+                    working.PerformColorFlip(nextColorFlip);
+                    foreach (BigInteger next in working.GetTransformationNumbers(Values))
+                    {
+                        yield return next;
+                    }
                 }
             }
         }
 
-        public BigInteger GetLowestTransformationNumber(TwoByTwo? working, Dictionary<FaceColor, BigInteger> Values, List<Dictionary<FaceColor, FaceColor>> colorFlips)
+        /// <summary>
+        /// retrieves transformation numbers. This modifies the state of the cube.
+        /// </summary>
+        /// <param name="Values">color mapping</param>
+        /// <returns>transformation numbers</returns>
+        private IEnumerable<BigInteger> GetTransformationNumbers(Dictionary<FaceColor, BigInteger> Values)
+        {
+            yield return GetTransformationNumber(Values);
+
+            if (ALLOW_CUBE_ROTATION_TRANSFORMATIONS)
+            {
+                CubeFaceRotation rightAntiClockwise = CubeFaceRotation.GetRotationForAxisAndDirection(CubeAxis.Right, -1);
+                CubeFaceRotation frontClockwise = CubeFaceRotation.GetRotationForAxisAndDirection(CubeAxis.Front, 1);
+                CubeFaceRotation frontAntiClockwise = CubeFaceRotation.GetRotationForAxisAndDirection(CubeAxis.Front, -1);
+
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(frontAntiClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(frontAntiClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(frontClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(frontClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(frontAntiClockwise);
+                yield return GetTransformationNumber(Values);
+
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+                PerformCubeFaceRotation(rightAntiClockwise);
+                yield return GetTransformationNumber(Values);
+            }
+        }
+
+        public BigInteger GetLowestTransformationNumber(TwoByTwo? working, Dictionary<FaceColor, BigInteger> Values, List<Dictionary<FaceColor, FaceColor>>? colorFlips)
         {
             bool found = false;
             BigInteger transformationNumber = 0;
@@ -1129,7 +1176,7 @@ namespace _2x2
             if (mirrorType != CubeMirrorType.Null)
             {
                 int[] cycle = new int[2];
-                if (mirrorType == CubeMirrorType.XEquals0)
+                if (mirrorType == CubeMirrorType.X)
                 {
                     cycle[0] = (int)TwoByTwoFace.ULFUp;
                     cycle[1] = (int)TwoByTwoFace.URFUp;
@@ -1168,7 +1215,7 @@ namespace _2x2
                     cycle[1] = (int)TwoByTwoFace.DRBRight;
                     PerformCycle(cycle);
                 }
-                else if (mirrorType == CubeMirrorType.YEquals0)
+                else if (mirrorType == CubeMirrorType.Y)
                 {
                     cycle[0] = (int)TwoByTwoFace.ULFFront;
                     cycle[1] = (int)TwoByTwoFace.DLFFront;
@@ -1207,7 +1254,7 @@ namespace _2x2
                     cycle[1] = (int)TwoByTwoFace.DRBDown;
                     PerformCycle(cycle);
                 }
-                else if (mirrorType == CubeMirrorType.ZEquals0)
+                else if (mirrorType == CubeMirrorType.Z)
                 {
                     cycle[0] = (int)TwoByTwoFace.ULFUp;
                     cycle[1] = (int)TwoByTwoFace.ULBUp;
@@ -1245,6 +1292,21 @@ namespace _2x2
                     cycle[0] = (int)TwoByTwoFace.DRFFront;
                     cycle[1] = (int)TwoByTwoFace.DRBBack;
                     PerformCycle(cycle);
+                }
+                else if (mirrorType == CubeMirrorType.XY)
+                {
+                    PerformMirror(CubeMirrorType.X);
+                    PerformMirror(CubeMirrorType.Y);
+                }
+                else if (mirrorType == CubeMirrorType.XZ)
+                {
+                    PerformMirror(CubeMirrorType.X);
+                    PerformMirror(CubeMirrorType.Z);
+                }
+                else if (mirrorType == CubeMirrorType.YZ)
+                {
+                    PerformMirror(CubeMirrorType.Y);
+                    PerformMirror(CubeMirrorType.Z);
                 }
                 else
                 {
@@ -1906,20 +1968,50 @@ namespace _2x2
                 CubeFace newFace = Face;
                 switch (mirror)
                 {
-                    case CubeMirrorType.XEquals0:
+                    case CubeMirrorType.X:
                         if (Face == CubeFace.Left)
                             newFace = CubeFace.Right;
                         else if (Face == CubeFace.Right)
                             newFace = CubeFace.Left;
                         break;
-                    case CubeMirrorType.YEquals0:
+                    case CubeMirrorType.Y:
                         if (Face == CubeFace.Up)
                             newFace = CubeFace.Down;
                         else if (Face == CubeFace.Down)
                             newFace = CubeFace.Up;
                         break;
-                    case CubeMirrorType.ZEquals0:
+                    case CubeMirrorType.Z:
                         if (Face == CubeFace.Front)
+                            newFace = CubeFace.Back;
+                        else if (Face == CubeFace.Back)
+                            newFace = CubeFace.Front;
+                        break;
+                    case CubeMirrorType.XY:
+                        if (Face == CubeFace.Left)
+                            newFace = CubeFace.Right;
+                        else if (Face == CubeFace.Right)
+                            newFace = CubeFace.Left;
+                        else if (Face == CubeFace.Up)
+                            newFace = CubeFace.Down;
+                        else if (Face == CubeFace.Down)
+                            newFace = CubeFace.Up;
+                        break;
+                    case CubeMirrorType.XZ:
+                        if (Face == CubeFace.Left)
+                            newFace = CubeFace.Right;
+                        else if (Face == CubeFace.Right)
+                            newFace = CubeFace.Left;
+                        else if (Face == CubeFace.Front)
+                            newFace = CubeFace.Back;
+                        else if (Face == CubeFace.Back)
+                            newFace = CubeFace.Front;
+                        break;
+                    case CubeMirrorType.YZ:
+                        if (Face == CubeFace.Up)
+                            newFace = CubeFace.Down;
+                        else if (Face == CubeFace.Down)
+                            newFace = CubeFace.Up;
+                        else if (Face == CubeFace.Front)
                             newFace = CubeFace.Back;
                         else if (Face == CubeFace.Back)
                             newFace = CubeFace.Front;
@@ -1928,14 +2020,25 @@ namespace _2x2
                         throw new InvalidOperationException();
                 }
                 int newDirection;
-                if (Direction == 1)
-                    newDirection = -1;
-                else if (Direction == -1)
-                    newDirection = 1;
-                else if (Direction == 2)
+                if (Direction == 2)
+                {
                     newDirection = 2;
+                }
                 else
-                    throw new InvalidOperationException();
+                {
+                    if (mirror == CubeMirrorType.X || mirror == CubeMirrorType.Y || mirror == CubeMirrorType.Z)
+                    {
+                        newDirection = Direction * -1;
+                    }
+                    else if (mirror == CubeMirrorType.XY || mirror == CubeMirrorType.XZ || mirror == CubeMirrorType.YZ)
+                    {
+                        newDirection = Direction;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException();
+                    }
+                }
                 ret = GetRotationForFaceAndDirection(newFace, newDirection);
             }
             return ret;
@@ -2059,9 +2162,36 @@ namespace _2x2
     public enum CubeMirrorType
     {
         Null,
-        XEquals0,
-        YEquals0,
-        ZEquals0,
+
+        /// <summary>
+        /// mirror about X=0
+        /// </summary>
+        X,
+
+        /// <summary>
+        /// mirror about Y=0
+        /// </summary>
+        Y,
+
+        /// <summary>
+        /// mirror about Z=0
+        /// </summary>
+        Z,
+
+        /// <summary>
+        /// mirror about X=0 and Y=0
+        /// </summary>
+        XY,
+
+        /// <summary>
+        /// mirror about X=0 and Z=0
+        /// </summary>
+        XZ,
+
+        /// <summary>
+        /// mirror about Y=0 and Z=0
+        /// </summary>
+        YZ,
     }
 
     public class CubePriorityNode
@@ -2253,6 +2383,24 @@ namespace _2x2
             foreach (BigInteger next in transformations1)
             {
                 Assert.IsTrue(transformations2.Contains(next));
+            }
+        }
+
+        [TestMethod]
+        public void ValidateMirrors()
+        {
+            TwoByTwo solved = new TwoByTwo(StandardPatterns.Solved);
+            TwoByTwo cube = new TwoByTwo(StandardPatterns.Unknown);
+            HashSet<string> mirrorStrings = new HashSet<string>();
+            foreach (CubeMirrorType mirror in Enum.GetValues(typeof(CubeMirrorType)))
+            {
+                cube.SetFromOtherCube(solved);
+                cube.PerformMirror(mirror);
+                string sCube = cube.ToString();
+                Assert.IsFalse(mirrorStrings.Contains(sCube));
+                mirrorStrings.Add(sCube);
+                cube.PerformMirror(mirror);
+                Assert.IsTrue(cube.IsEqualToOtherCube(solved));
             }
         }
 
