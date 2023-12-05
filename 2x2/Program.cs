@@ -17,16 +17,16 @@ namespace _2x2
                 else
                     Console.Out.WriteLine();
                 Console.Out.WriteLine($"-----------Processing {nextPattern} Regular----------");
-                GetSolutions(nextPattern, true, true);
-                GetSolutions(nextPattern, true, false);
-                GetBestSolutions(nextPattern, true, true);
-                GetBestSolutions(nextPattern, true, false);
+                GetSolutions(nextPattern, true, true, true);
+                GetSolutions(nextPattern, true, false, true);
+                GetBestSolutions(nextPattern, true, true, true);
+                GetBestSolutions(nextPattern, true, false, true);
                 Console.Out.WriteLine();
                 Console.Out.WriteLine($"-----------Processing {nextPattern} Ortega----------");
-                GetSolutions(nextPattern, false, true);
-                GetSolutions(nextPattern, false, false);
-                GetBestSolutions(nextPattern, false, true);
-                GetBestSolutions(nextPattern, false, false);
+                GetSolutions(nextPattern, false, true, true);
+                GetSolutions(nextPattern, false, false, true);
+                GetBestSolutions(nextPattern, false, true, true);
+                GetBestSolutions(nextPattern, false, false, true);
             }
             Console.Out.WriteLine("Done!");
             Console.ReadKey();
@@ -45,7 +45,7 @@ namespace _2x2
             };
         }
 
-        static void GetBestSolutions(StandardPatterns topPattern, bool bottomSolved, bool countOnly)
+        static void GetBestSolutions(StandardPatterns topPattern, bool bottomSolved, bool countOnly, bool bidirectionalSearch)
         {
             TwoByTwo start = new TwoByTwo(topPattern);
             TwoByTwo finish = new TwoByTwo(StandardPatterns.UpComplete);
@@ -56,10 +56,10 @@ namespace _2x2
             }
             Console.Out.WriteLine();
             Console.Out.WriteLine($"Bottom solved={bottomSolved} countOnly={countOnly}");
-            TwoByTwo.FindSequences(start, finish, true, false, countOnly);
+            TwoByTwo.FindSequences(start, finish, true, false, countOnly, bidirectionalSearch);
         }
 
-        static void GetSolutions(StandardPatterns topPattern, bool bottomSolved, bool includeHalfRotations)
+        static void GetSolutions(StandardPatterns topPattern, bool bottomSolved, bool includeHalfRotations, bool bidirectionalSearch)
         {
             TwoByTwo start = new TwoByTwo(topPattern);
             TwoByTwo finish = new TwoByTwo(StandardPatterns.UpComplete);
@@ -70,7 +70,7 @@ namespace _2x2
             }
             Console.Out.WriteLine();
             Console.Out.WriteLine($"Bottom solved={bottomSolved} includeHalf={includeHalfRotations}");
-            TwoByTwo.FindSequences(start, finish, false, includeHalfRotations, true);
+            TwoByTwo.FindSequences(start, finish, false, includeHalfRotations, true, bidirectionalSearch);
         }
     }
 
@@ -118,7 +118,7 @@ namespace _2x2
     {
         public static bool ALLOW_CUBE_ROTATION_TRANSFORMATIONS = true;
 
-        public static void FindSequences(TwoByTwo start, TwoByTwo finish, bool allCombinations, bool includeHalfRotations, bool countOnly)
+        public static void FindSequences(TwoByTwo start, TwoByTwo finish, bool allCombinations, bool includeHalfRotations, bool countOnly, bool bidirectionalSearch)
         {
             TwoByTwo working = new TwoByTwo(start);
             TwoByTwo working2 = new TwoByTwo(start);
@@ -127,118 +127,36 @@ namespace _2x2
             Dictionary<FaceColor, BigInteger> colorValues = GetColorValuesFromCube(start);
             List<CubeMirrorType> cubeMirrors = new List<CubeMirrorType>(start.GetMirrors(working));
 
-            BigInteger startTransformationNumber = start.GetLowestTransformationNumber(working, colorValues, colorFlips);
-            BigInteger finishTransformationNumber = finish.GetLowestTransformationNumber(working, colorValues, colorFlips);
-            if (startTransformationNumber == finishTransformationNumber)
+            BigInteger startLowestTransformationNumber = start.GetLowestTransformationNumber(working, colorValues, colorFlips);
+            BigInteger finishLowestTransformationNumber = finish.GetLowestTransformationNumber(working, colorValues, colorFlips);
+            if (startLowestTransformationNumber == finishLowestTransformationNumber)
             {
                 Console.Out.WriteLine("Already solved!");
             }
             else
             {
-                int nextPriority = 0;
                 Dictionary<BigInteger, FaceColor> reverseColorValues = GetReverseColorValues(colorValues);
-                Dictionary<BigInteger, int> finalPositions = new Dictionary<BigInteger, int>();
-                Dictionary<BigInteger, int> currentPositions = new Dictionary<BigInteger, int>();
-                BigInteger transformationNumber = start.GetLowestTransformationNumber(working, colorValues, colorFlips);
-                PriorityQueue<CubePriorityNode, int> pq = new PriorityQueue<CubePriorityNode, int>();
-                pq.Enqueue(new CubePriorityNode(transformationNumber, 0), 0);
-                currentPositions[transformationNumber] = 0;
-                int? finishPriority = null;
-                while (pq.Count > 0)
+                Dictionary<int, HashSet<BigInteger>>? goodSequencePositions;
+                if (bidirectionalSearch)
                 {
-                    CubePriorityNode cpn = pq.Dequeue();
-                    transformationNumber = cpn.TransformationNumber;
-                    working.SetFromTransformationNumber(transformationNumber, reverseColorValues);
-
-                    if (!finalPositions.ContainsKey(transformationNumber))
-                    {
-                        int currentPriority = cpn.Priority;
-
-                        if (currentPriority > nextPriority)
-                        {
-                            Console.Out.WriteLine($"Finished priority {nextPriority} with {currentPositions.Count} positions.");
-                            nextPriority = currentPriority;
-                            if (finishPriority.HasValue && currentPriority > finishPriority.Value)
-                            {
-                                break;
-                            }
-                        }
-
-                        finalPositions[transformationNumber] = currentPriority;
-                        currentPositions.Remove(transformationNumber);
-
-                        if (transformationNumber == finishTransformationNumber)
-                        {
-                            if (finishPriority.HasValue)
-                            {
-                                if (currentPriority != finishPriority.Value)
-                                {
-                                    throw new InvalidOperationException();
-                                }
-                            }
-                            else
-                            {
-                                finishPriority = currentPriority;
-                            }
-                        }
-                        else //process all rotations
-                        {
-                            bool first = true;
-                            foreach (FaceRotation nextRotationMove in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
-                            {
-                                if (first)
-                                {
-                                    first = false;
-                                }
-                                else
-                                {
-                                    working.SetFromTransformationNumber(transformationNumber, reverseColorValues);
-                                }
-                                working.PerformFaceRotation(nextRotationMove);
-                                ProcessNextRotation(working, working2, colorValues, finalPositions, currentPositions, currentPriority, pq, colorFlips);
-                            }
-                        }
-                    }
+                    goodSequencePositions = DoBidirectionalSearch(startLowestTransformationNumber, finishLowestTransformationNumber, working, working2, colorValues, reverseColorValues, colorFlips, includeHalfRotations);
+                }
+                else
+                {
+                    goodSequencePositions = DoBreadthFirstSearch(startLowestTransformationNumber, finishLowestTransformationNumber, working, working2, colorValues, reverseColorValues, colorFlips, includeHalfRotations);
                 }
 
-                if (finishPriority.HasValue)
+                if (goodSequencePositions != null)
                 {
-                    int finishPriorityValue = finishPriority.Value;
-
-                    //find all positions on the optimal path between the start and finish, with a separate list for each
-                    //sequence number
-                    Dictionary<int, HashSet<BigInteger>> goodSequencePositions = new Dictionary<int, HashSet<BigInteger>>();
-                    goodSequencePositions[finishPriorityValue] = new HashSet<BigInteger>()
+                    int finishPriorityValue = 0;
+                    while (goodSequencePositions.ContainsKey(finishPriorityValue+1))
                     {
-                        finishTransformationNumber
-                    };
-                    int currentlyProcessingPriorityValue = finishPriorityValue - 1;
-                    while (currentlyProcessingPriorityValue >= 0)
-                    {
-                        HashSet<BigInteger> nextPriorityPositions = new HashSet<BigInteger>();
-                        goodSequencePositions[currentlyProcessingPriorityValue] = nextPriorityPositions;
-                        foreach (BigInteger nextPosition in goodSequencePositions[currentlyProcessingPriorityValue+1])
-                        {
-                            foreach (FaceRotation nextFaceRotation in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
-                            {
-                                working.SetFromTransformationNumber(nextPosition, reverseColorValues);
-                                working.PerformFaceRotation(nextFaceRotation);
-                                BigInteger nextPositionNumber = working.GetLowestTransformationNumber(working2, colorValues, colorFlips);
-                                if (finalPositions.TryGetValue(nextPositionNumber, out int foundFinalPositionNumber))
-                                {
-                                    if (foundFinalPositionNumber == currentlyProcessingPriorityValue & !nextPriorityPositions.Contains(nextPositionNumber))
-                                    {
-                                        nextPriorityPositions.Add(nextPositionNumber);
-                                    }
-                                }
-                            }
-                        }
-                        currentlyProcessingPriorityValue--;
+                        finishPriorityValue++;
                     }
 
                     BigInteger startExactValue = start.GetTransformationNumber(colorValues);
 
-                    PositionTree pt = new PositionTree(startExactValue, startTransformationNumber, null, null);
+                    PositionTree pt = new PositionTree(startExactValue, startLowestTransformationNumber, null, null);
                     ProcessPositionTree(pt, 0, finishPriorityValue, goodSequencePositions, working, working2, colorValues, reverseColorValues, colorFlips, allCombinations, includeHalfRotations);
 
                     //obtain all the sequences
@@ -274,7 +192,7 @@ namespace _2x2
                     cubeSequences.Sort(); //sort the sequences
 
                     Dictionary<BigInteger, string> positionText = new Dictionary<BigInteger, string>();
-                    positionText[startTransformationNumber] = "0";
+                    positionText[startLowestTransformationNumber] = "0";
                     Dictionary<int, char> positionCharacters = new Dictionary<int, char>();
 
                     HashSet<string> sequencesSet = new HashSet<string>();
@@ -332,7 +250,7 @@ namespace _2x2
                                 allStrings.Clear();
                                 positionCharacters.Clear();
                                 positionText.Clear();
-                                positionText[startTransformationNumber] = "0";
+                                positionText[startLowestTransformationNumber] = "0";
                             }
                         }
 
@@ -368,7 +286,7 @@ namespace _2x2
                             int sequenceIndex = 0;
                             List<BigInteger> positions = new List<BigInteger>();
                             working.SetFromOtherCube(start);
-                            positions.Add(startTransformationNumber);
+                            positions.Add(startLowestTransformationNumber);
                             foreach (FaceRotation fr in nextCubeSequence.Rotations)
                             {
                                 sequenceIndex++;
@@ -420,6 +338,326 @@ namespace _2x2
                     }
                 }
             }
+        }
+
+        private static Dictionary<int, HashSet<BigInteger>>? DoBidirectionalSearch(BigInteger startLowestTransformationNumber, BigInteger finishLowestTransformationNumber, TwoByTwo working, TwoByTwo working2, Dictionary<FaceColor, BigInteger> colorValues, Dictionary<BigInteger, FaceColor> reverseColorValues, List<Dictionary<FaceColor, FaceColor>> colorFlips, bool includeHalfRotations)
+        {
+            Dictionary<BigInteger, int> finalPositionsFromStart = new Dictionary<BigInteger, int>();
+            Dictionary<BigInteger, int> currentPositionsFromStart = new Dictionary<BigInteger, int>();
+            Dictionary<BigInteger, int> finalPositionsFromEnd = new Dictionary<BigInteger, int>();
+            Dictionary<BigInteger, int> currentPositionsFromEnd = new Dictionary<BigInteger, int>();            
+            PriorityQueue<CubePriorityNode, int> pqFromStart = new PriorityQueue<CubePriorityNode, int>();
+            PriorityQueue<CubePriorityNode, int> pqFromEnd = new PriorityQueue<CubePriorityNode, int>();
+            pqFromStart.Enqueue(new CubePriorityNode(startLowestTransformationNumber, 0), 0);
+            currentPositionsFromStart[startLowestTransformationNumber] = 0;
+            pqFromEnd.Enqueue(new CubePriorityNode(finishLowestTransformationNumber, 0), 0);
+            currentPositionsFromEnd[finishLowestTransformationNumber] = 0;
+
+            int? foundPathFromStart = null;
+            int? foundPathFromEnd = null;
+            int? processedStartPriority = null;
+            int? processedEndPriority = null;
+            int nextToProcessStartPriority = 0;
+            int nextToProcessEndPriority = 0;
+            while (!foundPathFromStart.HasValue)
+            {
+                //process the next level of positions reached from the starting point
+                CubePriorityNode? cpn;
+                while (true)
+                {
+                    if (!pqFromStart.TryPeek(out cpn, out int iCPNPriority))
+                    {
+                        return null;
+                    }
+                    if (iCPNPriority == nextToProcessStartPriority)
+                    {
+                        CubePriorityNode cpn2 = pqFromStart.Dequeue();
+                        BigInteger txNumber = cpn2.TransformationNumber;
+                        working.SetFromTransformationNumber(txNumber, reverseColorValues);
+                        finalPositionsFromStart[txNumber] = nextToProcessStartPriority;
+                        currentPositionsFromStart.Remove(txNumber);
+                        if (finalPositionsFromEnd.ContainsKey(txNumber))
+                        {
+                            if (!foundPathFromStart.HasValue)
+                            {
+                                foundPathFromStart = nextToProcessStartPriority;
+                                foundPathFromEnd = finalPositionsFromEnd[txNumber] - 1;
+                            }
+                        }
+                        else
+                        {
+                            bool first = true;
+                            foreach (FaceRotation nextRotationMove in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
+                            {
+                                if (first)
+                                {
+                                    first = false;
+                                }
+                                else
+                                {
+                                    working.SetFromTransformationNumber(txNumber, reverseColorValues);
+                                }
+                                working.PerformFaceRotation(nextRotationMove);
+                                ProcessNextRotation(working, working2, colorValues, finalPositionsFromStart, currentPositionsFromStart, iCPNPriority, pqFromStart, colorFlips);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        processedStartPriority = nextToProcessStartPriority;
+                        Console.Out.WriteLine($"Finished priority {nextToProcessStartPriority} from start with {currentPositionsFromStart.Count} positions.");
+                        if (!foundPathFromStart.HasValue)
+                        {
+                            nextToProcessStartPriority++;
+                        }
+                        break;
+                    }
+                }
+                if (foundPathFromStart.HasValue)
+                {
+                    break;
+                }
+
+                //process the next level of positions reached from the finish point
+                while (true)
+                {
+                    if (!pqFromEnd.TryPeek(out cpn, out int iCPNPriority))
+                    {
+                        return null;
+                    }
+                    if (iCPNPriority == nextToProcessEndPriority)
+                    {
+                        CubePriorityNode cpn2 = pqFromEnd.Dequeue();
+                        BigInteger txNumber = cpn2.TransformationNumber;
+                        working.SetFromTransformationNumber(txNumber, reverseColorValues);
+                        finalPositionsFromEnd[txNumber] = nextToProcessEndPriority;
+                        currentPositionsFromEnd.Remove(txNumber);
+                        if (finalPositionsFromStart.ContainsKey(txNumber))
+                        {
+                            if (!foundPathFromStart.HasValue)
+                            {
+                                foundPathFromStart = finalPositionsFromEnd[txNumber] - 1;
+                                foundPathFromEnd = nextToProcessEndPriority;
+                            }
+                        }
+                        else
+                        {
+                            bool first = true;
+                            foreach (FaceRotation nextRotationMove in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
+                            {
+                                if (first)
+                                {
+                                    first = false;
+                                }
+                                else
+                                {
+                                    working.SetFromTransformationNumber(txNumber, reverseColorValues);
+                                }
+                                working.PerformFaceRotation(nextRotationMove);
+                                ProcessNextRotation(working, working2, colorValues, finalPositionsFromEnd, currentPositionsFromEnd, iCPNPriority, pqFromEnd, colorFlips);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        processedEndPriority = nextToProcessEndPriority;
+                        Console.Out.WriteLine($"Finished priority {nextToProcessEndPriority} from end with {currentPositionsFromEnd.Count} positions.");
+                        if (!foundPathFromStart.HasValue)
+                        {
+                            nextToProcessEndPriority++;
+                        }
+                        break;
+                    }
+                }
+                if (foundPathFromStart.HasValue)
+                {
+                    break;
+                }
+            }
+
+            Dictionary<int, HashSet<BigInteger>>? ret = null;
+            if (foundPathFromStart.HasValue && foundPathFromEnd.HasValue)
+            {
+                int finalStartPriority = foundPathFromStart.Value;
+                int finalEndPriority = foundPathFromEnd.Value;
+                ret = new Dictionary<int, HashSet<BigInteger>>();
+                ret[finalStartPriority] = new HashSet<BigInteger>();
+                HashSet<BigInteger> nextPriorityPositions = ret[finalStartPriority];
+
+                foreach (var next in finalPositionsFromStart)
+                {
+                    if (next.Value == finalStartPriority)
+                    {
+                        foreach (FaceRotation nextFaceRotation in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
+                        {
+                            working.SetFromTransformationNumber(next.Key, reverseColorValues);
+                            working.PerformFaceRotation(nextFaceRotation);
+                            BigInteger nextPositionNumber = working.GetLowestTransformationNumber(working2, colorValues, colorFlips);
+                            if (finalPositionsFromEnd.TryGetValue(nextPositionNumber, out int foundFinalPositionNumber))
+                            {
+                                if (foundFinalPositionNumber == finalEndPriority & !nextPriorityPositions.Contains(next.Key))
+                                {
+                                    nextPriorityPositions.Add(next.Key);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for (int i = finalStartPriority - 1; i >= 0; i--)
+                {
+                    ret[i] = new HashSet<BigInteger>();
+                    nextPriorityPositions = ret[i];
+                    foreach (BigInteger nextPosition in ret[i+1])
+                    {
+                        foreach (FaceRotation nextFaceRotation in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
+                        {
+                            working.SetFromTransformationNumber(nextPosition, reverseColorValues);
+                            working.PerformFaceRotation(nextFaceRotation);
+                            BigInteger nextPositionNumber = working.GetLowestTransformationNumber(working2, colorValues, colorFlips);
+                            if (finalPositionsFromStart.TryGetValue(nextPositionNumber, out int foundFinalPositionNumber))
+                            {
+                                if (foundFinalPositionNumber == i & !nextPriorityPositions.Contains(nextPositionNumber))
+                                {
+                                    nextPriorityPositions.Add(nextPositionNumber);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                int nextPositionPriority = finalStartPriority;
+                for (int i = finalEndPriority; i >= 0; i--)
+                {
+                    nextPositionPriority++;
+                    ret[nextPositionPriority] = new HashSet<BigInteger>();
+                    nextPriorityPositions = ret[nextPositionPriority];
+                    foreach (BigInteger nextPosition in ret[nextPositionPriority - 1])
+                    {
+                        foreach (FaceRotation nextFaceRotation in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
+                        {
+                            working.SetFromTransformationNumber(nextPosition, reverseColorValues);
+                            working.PerformFaceRotation(nextFaceRotation);
+                            BigInteger nextPositionNumber = working.GetLowestTransformationNumber(working2, colorValues, colorFlips);
+                            if (finalPositionsFromEnd.TryGetValue(nextPositionNumber, out int foundFinalPositionNumber))
+                            {
+                                if (foundFinalPositionNumber == i & !nextPriorityPositions.Contains(nextPositionNumber))
+                                {
+                                    nextPriorityPositions.Add(nextPositionNumber);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return ret;
+        }
+
+        private static Dictionary<int, HashSet<BigInteger>>? DoBreadthFirstSearch(BigInteger startLowestTransformationNumber, BigInteger finishLowestTransformationNumber, TwoByTwo working, TwoByTwo working2, Dictionary<FaceColor, BigInteger> colorValues, Dictionary<BigInteger, FaceColor> reverseColorValues, List<Dictionary<FaceColor, FaceColor>> colorFlips, bool includeHalfRotations)
+        {
+            int nextPriority = 0;
+            Dictionary<BigInteger, int> finalPositions = new Dictionary<BigInteger, int>();
+            Dictionary<BigInteger, int> currentPositions = new Dictionary<BigInteger, int>();
+            PriorityQueue<CubePriorityNode, int> pq = new PriorityQueue<CubePriorityNode, int>();
+            pq.Enqueue(new CubePriorityNode(startLowestTransformationNumber, 0), 0);
+            currentPositions[startLowestTransformationNumber] = 0;
+            int? finishPriority = null;
+            while (pq.Count > 0)
+            {
+                CubePriorityNode cpn = pq.Dequeue();
+                startLowestTransformationNumber = cpn.TransformationNumber;
+                working.SetFromTransformationNumber(startLowestTransformationNumber, reverseColorValues);
+
+                if (!finalPositions.ContainsKey(startLowestTransformationNumber))
+                {
+                    int currentPriority = cpn.Priority;
+
+                    if (currentPriority > nextPriority)
+                    {
+                        Console.Out.WriteLine($"Finished priority {nextPriority} with {currentPositions.Count} positions.");
+                        nextPriority = currentPriority;
+                        if (finishPriority.HasValue && currentPriority > finishPriority.Value)
+                        {
+                            break;
+                        }
+                    }
+
+                    finalPositions[startLowestTransformationNumber] = currentPriority;
+                    currentPositions.Remove(startLowestTransformationNumber);
+
+                    if (startLowestTransformationNumber == finishLowestTransformationNumber)
+                    {
+                        if (finishPriority.HasValue)
+                        {
+                            if (currentPriority != finishPriority.Value)
+                            {
+                                throw new InvalidOperationException();
+                            }
+                        }
+                        else
+                        {
+                            finishPriority = currentPriority;
+                        }
+                    }
+                    else //process all rotations
+                    {
+                        bool first = true;
+                        foreach (FaceRotation nextRotationMove in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
+                        {
+                            if (first)
+                            {
+                                first = false;
+                            }
+                            else
+                            {
+                                working.SetFromTransformationNumber(startLowestTransformationNumber, reverseColorValues);
+                            }
+                            working.PerformFaceRotation(nextRotationMove);
+                            ProcessNextRotation(working, working2, colorValues, finalPositions, currentPositions, currentPriority, pq, colorFlips);
+                        }
+                    }
+                }
+            }
+
+            Dictionary<int, HashSet<BigInteger>>? goodSequencePositions = null;
+            if (finishPriority.HasValue)
+            {
+                int finishPriorityValue = finishPriority.Value;
+
+                //find all positions on the optimal path between the start and finish, with a separate list for each
+                //sequence number
+                goodSequencePositions = new Dictionary<int, HashSet<BigInteger>>();
+                goodSequencePositions[finishPriorityValue] = new HashSet<BigInteger>()
+                    {
+                        finishLowestTransformationNumber
+                    };
+                int currentlyProcessingPriorityValue = finishPriorityValue - 1;
+                while (currentlyProcessingPriorityValue >= 0)
+                {
+                    HashSet<BigInteger> nextPriorityPositions = new HashSet<BigInteger>();
+                    goodSequencePositions[currentlyProcessingPriorityValue] = nextPriorityPositions;
+                    foreach (BigInteger nextPosition in goodSequencePositions[currentlyProcessingPriorityValue + 1])
+                    {
+                        foreach (FaceRotation nextFaceRotation in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
+                        {
+                            working.SetFromTransformationNumber(nextPosition, reverseColorValues);
+                            working.PerformFaceRotation(nextFaceRotation);
+                            BigInteger nextPositionNumber = working.GetLowestTransformationNumber(working2, colorValues, colorFlips);
+                            if (finalPositions.TryGetValue(nextPositionNumber, out int foundFinalPositionNumber))
+                            {
+                                if (foundFinalPositionNumber == currentlyProcessingPriorityValue & !nextPriorityPositions.Contains(nextPositionNumber))
+                                {
+                                    nextPriorityPositions.Add(nextPositionNumber);
+                                }
+                            }
+                        }
+                    }
+                    currentlyProcessingPriorityValue--;
+                }
+            }
+
+            return goodSequencePositions;
         }
 
         public IEnumerable<CubeMirrorType> GetMirrors(TwoByTwo working)
