@@ -399,13 +399,12 @@ namespace _2x2
             pqFromEnd.Enqueue(new CubePriorityNode(finishLowestTransformationNumber, 0), 0);
             currentPositionsFromEnd[finishLowestTransformationNumber] = 0;
 
-            int? foundPathFromStart = null;
-            int? foundPathFromEnd = null;
+            bool foundPathFromStart = false;
             int? processedStartPriority = null;
             int? processedEndPriority = null;
             int nextToProcessStartPriority = 0;
             int nextToProcessEndPriority = 0;
-            while (!foundPathFromStart.HasValue)
+            while (!foundPathFromStart)
             {
                 int startCount = pqFromStart.Count;
                 int endCount = pqFromEnd.Count;
@@ -449,19 +448,8 @@ namespace _2x2
                         nextCurrentPositions.Remove(txNumber);
                         if (oppositeFinalPositions.ContainsKey(txNumber))
                         {
-                            if (!foundPathFromStart.HasValue)
-                            {
-                                if (processFromStart)
-                                {
-                                    foundPathFromStart = nextToProcessStartPriority;
-                                    foundPathFromEnd = processedEndPriority.Value;
-                                }
-                                else
-                                {
-                                    foundPathFromStart = processedStartPriority.Value;
-                                    foundPathFromEnd = nextToProcessEndPriority;
-                                }
-                            }
+                            foundPathFromStart = true;
+                            break; //found a link from start to end, so stop processing
                         }
                         else
                         {
@@ -492,16 +480,13 @@ namespace _2x2
                             processedEndPriority = nextToProcessEndPriority;
                         }
                         Console.Out.WriteLine($"Finished priority {nextToProcessPriority} from {sProcessFrom} with {nextCurrentPositions.Count} positions.");
-                        if (!foundPathFromStart.HasValue)
+                        if (processFromStart)
                         {
-                            if (processFromStart)
-                            {
-                                nextToProcessStartPriority++;
-                            }
-                            else
-                            {
-                                nextToProcessEndPriority++;
-                            }
+                            nextToProcessStartPriority++;
+                        }
+                        else
+                        {
+                            nextToProcessEndPriority++;
                         }
                         break;
                     }
@@ -509,10 +494,10 @@ namespace _2x2
             }
 
             Dictionary<int, HashSet<BigInteger>>? ret = null;
-            if (foundPathFromStart.HasValue && foundPathFromEnd.HasValue)
+            if (foundPathFromStart)
             {
-                int finalStartPriority = foundPathFromStart.Value;
-                int finalEndPriority = foundPathFromEnd.Value;
+                int finalStartPriority = processedStartPriority.Value;
+                int finalEndPriority = processedEndPriority.Value;
                 ret = new Dictionary<int, HashSet<BigInteger>>();
                 ret[finalStartPriority] = new HashSet<BigInteger>();
                 HashSet<BigInteger> nextPriorityPositions = ret[finalStartPriority];
@@ -528,7 +513,7 @@ namespace _2x2
                             BigInteger nextPositionNumber = working.GetLowestTransformationNumber(working2, colorValues, colorFlips);
                             if (finalPositionsFromEnd.TryGetValue(nextPositionNumber, out int foundFinalPositionNumber))
                             {
-                                if (foundFinalPositionNumber == (finalEndPriority - 1) & !nextPriorityPositions.Contains(next.Key))
+                                if (foundFinalPositionNumber == finalEndPriority & !nextPriorityPositions.Contains(next.Key))
                                 {
                                     nextPriorityPositions.Add(next.Key);
                                 }
@@ -560,7 +545,7 @@ namespace _2x2
                 }
 
                 int nextPositionPriority = finalStartPriority;
-                for (int i = finalEndPriority - 1; i >= 0; i--)
+                for (int i = finalEndPriority; i >= 0; i--)
                 {
                     nextPositionPriority++;
                     ret[nextPositionPriority] = new HashSet<BigInteger>();
