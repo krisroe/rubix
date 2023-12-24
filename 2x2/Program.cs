@@ -8,6 +8,8 @@ namespace _2x2
     {
         static void Main()
         {
+            MetricType mt = MetricType.MaxRUL;
+            bool skipMirrors = false;
             List<StandardPatterns> patternsToCheck = GetStandardPatternsToCheck();
             bool first = true;
             foreach (StandardPatterns nextPattern in patternsToCheck)
@@ -19,14 +21,14 @@ namespace _2x2
                 Console.Out.WriteLine($"-----------Processing {nextPattern} Regular----------");
                 GetSolutions(nextPattern, true, true, true);
                 GetSolutions(nextPattern, true, false, true);
-                GetBestSolutions(nextPattern, true, true, true);
-                GetBestSolutions(nextPattern, true, false, true);
+                GetBestSolutions(nextPattern, true, true, true, mt, skipMirrors);
+                GetBestSolutions(nextPattern, true, false, true, mt, skipMirrors);
                 Console.Out.WriteLine();
                 Console.Out.WriteLine($"-----------Processing {nextPattern} Ortega----------");
                 GetSolutions(nextPattern, false, true, true);
                 GetSolutions(nextPattern, false, false, true);
-                GetBestSolutions(nextPattern, false, true, true);
-                GetBestSolutions(nextPattern, false, false, true);
+                GetBestSolutions(nextPattern, false, true, true, mt, skipMirrors);
+                GetBestSolutions(nextPattern, false, false, true, mt, skipMirrors);
             }
             Console.Out.WriteLine("Done!");
             Console.ReadKey();
@@ -45,7 +47,7 @@ namespace _2x2
             };
         }
 
-        static void GetBestSolutions(StandardPatterns topPattern, bool bottomSolved, bool countOnly, bool bidirectionalSearch)
+        static void GetBestSolutions(StandardPatterns topPattern, bool bottomSolved, bool countOnly, bool bidirectionalSearch, MetricType metricType, bool skipMirrors)
         {
             TwoByTwo start = new TwoByTwo(topPattern);
             TwoByTwo finish = new TwoByTwo(StandardPatterns.UpComplete);
@@ -56,7 +58,7 @@ namespace _2x2
             }
             Console.Out.WriteLine();
             Console.Out.WriteLine($"Bottom solved={bottomSolved} countOnly={countOnly}");
-            TwoByTwo.FindSequences(start, finish, true, false, countOnly, bidirectionalSearch);
+            TwoByTwo.FindSequences(start, finish, true, false, countOnly, bidirectionalSearch, metricType, skipMirrors);
         }
 
         static void GetSolutions(StandardPatterns topPattern, bool bottomSolved, bool includeHalfRotations, bool bidirectionalSearch)
@@ -70,8 +72,16 @@ namespace _2x2
             }
             Console.Out.WriteLine();
             Console.Out.WriteLine($"Bottom solved={bottomSolved} includeHalf={includeHalfRotations}");
-            TwoByTwo.FindSequences(start, finish, false, includeHalfRotations, true, bidirectionalSearch);
+            TwoByTwo.FindSequences(start, finish, false, includeHalfRotations, true, bidirectionalSearch, MetricType.MinimizeRotationsBeyondTwoFaces, true);
         }
+    }
+
+    public enum MetricType
+    {
+        All,
+        MinimizeRotationsBeyondTwoFaces,
+        MaxRU,
+        MaxRUL,
     }
 
     public enum TwoByTwoCorner
@@ -118,7 +128,7 @@ namespace _2x2
     {
         public static bool ALLOW_CUBE_ROTATION_TRANSFORMATIONS = true;
 
-        public static void FindSequences(TwoByTwo start, TwoByTwo finish, bool allCombinations, bool includeHalfRotations, bool countOnly, bool bidirectionalSearch)
+        public static void FindSequences(TwoByTwo start, TwoByTwo finish, bool allCombinations, bool includeHalfRotations, bool countOnly, bool bidirectionalSearch, MetricType metricType, bool skipMirrors)
         {
             TwoByTwo working = new TwoByTwo(start);
             TwoByTwo working2 = new TwoByTwo(start);
@@ -203,30 +213,7 @@ namespace _2x2
                     {
                         if (!countOnly)
                         {
-                            Dictionary<CubeFace, int> faceCounts = new Dictionary<CubeFace, int>();
-                            foreach (FaceRotation fr in nextCubeSequence.Rotations)
-                            {
-                                if (!faceCounts.TryGetValue(fr.Face, out int currentValue))
-                                {
-                                    currentValue = 0;
-                                }
-                                faceCounts[fr.Face] = currentValue + 1;
-                            }
-                            List<int> faceCountsValues = new List<int>();
-                            foreach (var next in faceCounts)
-                            {
-                                faceCountsValues.Add(next.Value);
-                            }
-                            int iNextSequenceMetric = 0;
-                            if (faceCountsValues.Count > 2)
-                            {
-                                faceCountsValues.Sort();
-                                faceCountsValues.Reverse();
-                                for (int i = 2; i < faceCountsValues.Count; i++)
-                                {
-                                    iNextSequenceMetric += faceCountsValues[i];
-                                }
-                            }
+                            int iNextSequenceMetric = GetMetric(nextCubeSequence, metricType);
                             bool newBest = false;
                             if (currentBest.HasValue)
                             {
@@ -279,7 +266,7 @@ namespace _2x2
                                 break;
                             }
                         }
-                        if (!found)
+                        if (!found || !skipMirrors)
                         {
                             if (string.IsNullOrEmpty(baseSequence)) throw new InvalidOperationException();
 
@@ -323,7 +310,6 @@ namespace _2x2
                     {
                         sequences.Add(next);
                     }
-                    sequences.Sort();
                     Console.Out.WriteLine($"Found {sequences.Count} sequences of length {finishPriorityValue}.");
                     if (countOnly)
                     {
@@ -338,6 +324,65 @@ namespace _2x2
                     }
                 }
             }
+        }
+
+        private static int GetMetric(CubeSequence seq, MetricType metricType)
+        {
+            int iNextSequenceMetric = 0;
+            if (metricType != MetricType.All)
+            {
+                int iR, iU, iL;
+                Dictionary<CubeFace, int> faceCounts = new Dictionary<CubeFace, int>();
+                bool treatHalvesAsTwo = metricType == MetricType.MaxRU;
+                foreach (FaceRotation fr in seq.Rotations)
+                {
+                    if (!faceCounts.TryGetValue(fr.Face, out int currentValue))
+                    {
+                        currentValue = 0;
+                    }
+                    int increment;
+                    if (treatHalvesAsTwo && fr.Direction == 2)
+                    {
+                        increment = 2;
+                    }
+                    else
+                    {
+                        increment = 1;
+                    }
+                    faceCounts[fr.Face] = currentValue + increment;
+                }
+                if (metricType == MetricType.MinimizeRotationsBeyondTwoFaces)
+                {
+                    List<int> faceCountsValues = new List<int>();
+                    foreach (var next in faceCounts)
+                    {
+                        faceCountsValues.Add(next.Value);
+                    }
+                    if (faceCountsValues.Count > 2)
+                    {
+                        faceCountsValues.Sort();
+                        faceCountsValues.Reverse();
+                        for (int i = 2; i < faceCountsValues.Count; i++)
+                        {
+                            iNextSequenceMetric += faceCountsValues[i];
+                        }
+                    }
+                }
+                else if (metricType == MetricType.MaxRU)
+                {
+                    faceCounts.TryGetValue(CubeFace.Right, out iR);
+                    faceCounts.TryGetValue(CubeFace.Up, out iU);
+                    iNextSequenceMetric = 0 - iR - iU;
+                }
+                else if (metricType == MetricType.MaxRUL)
+                {
+                    faceCounts.TryGetValue(CubeFace.Right, out iR);
+                    faceCounts.TryGetValue(CubeFace.Left, out iL);
+                    faceCounts.TryGetValue(CubeFace.Up, out iU);
+                    iNextSequenceMetric = 0 - iR - iU - iL;
+                }
+            }
+            return iNextSequenceMetric;
         }
 
         private static Dictionary<int, HashSet<BigInteger>>? DoBidirectionalSearch(BigInteger startLowestTransformationNumber, BigInteger finishLowestTransformationNumber, TwoByTwo working, TwoByTwo working2, Dictionary<FaceColor, BigInteger> colorValues, Dictionary<BigInteger, FaceColor> reverseColorValues, List<Dictionary<FaceColor, FaceColor>> colorFlips, bool includeHalfRotations)
