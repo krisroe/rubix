@@ -10,6 +10,7 @@ namespace _2x2
         {
             MetricType mt = MetricType.MaxRUL;
             bool skipMirrors = false;
+            bool bidirectionalSearch = true;
             List<StandardPatterns> patternsToCheck = GetStandardPatternsToCheck();
             bool first = true;
             foreach (StandardPatterns nextPattern in patternsToCheck)
@@ -21,14 +22,14 @@ namespace _2x2
                 Console.Out.WriteLine($"-----------Processing {nextPattern} Regular----------");
                 GetSolutions(nextPattern, true, true, true);
                 GetSolutions(nextPattern, true, false, true);
-                GetBestSolutions(nextPattern, true, true, true, mt, skipMirrors);
-                GetBestSolutions(nextPattern, true, false, true, mt, skipMirrors);
+                GetBestSolutions(nextPattern, true, true, bidirectionalSearch, mt, skipMirrors);
+                GetBestSolutions(nextPattern, true, false, bidirectionalSearch, mt, skipMirrors);
                 Console.Out.WriteLine();
                 Console.Out.WriteLine($"-----------Processing {nextPattern} Ortega----------");
                 GetSolutions(nextPattern, false, true, true);
                 GetSolutions(nextPattern, false, false, true);
-                GetBestSolutions(nextPattern, false, true, true, mt, skipMirrors);
-                GetBestSolutions(nextPattern, false, false, true, mt, skipMirrors);
+                GetBestSolutions(nextPattern, false, true, bidirectionalSearch, mt, skipMirrors);
+                GetBestSolutions(nextPattern, false, false, bidirectionalSearch, mt, skipMirrors);
             }
             Console.Out.WriteLine("Done!");
             Console.ReadKey();
@@ -333,7 +334,7 @@ namespace _2x2
             {
                 int iR, iU, iL;
                 Dictionary<CubeFace, int> faceCounts = new Dictionary<CubeFace, int>();
-                bool treatHalvesAsTwo = metricType == MetricType.MaxRU;
+                bool treatHalvesAsTwo = metricType == MetricType.MaxRU || metricType == MetricType.MaxRUL;
                 foreach (FaceRotation fr in seq.Rotations)
                 {
                     if (!faceCounts.TryGetValue(fr.Face, out int currentValue))
@@ -406,27 +407,60 @@ namespace _2x2
             int nextToProcessEndPriority = 0;
             while (!foundPathFromStart.HasValue)
             {
-                //process the next level of positions reached from the starting point
+                int startCount = pqFromStart.Count;
+                int endCount = pqFromEnd.Count;
+                bool processFromStart = startCount <= endCount;
+                PriorityQueue<CubePriorityNode, int> nextPQ;
+                int nextToProcessPriority;
+                Dictionary<BigInteger, int> nextCurrentPositions;
+                Dictionary<BigInteger, int> nextFinalPositions, oppositeFinalPositions;
+                string sProcessFrom;
+                if (processFromStart)
+                {
+                    nextPQ = pqFromStart;
+                    nextToProcessPriority = nextToProcessStartPriority;
+                    nextCurrentPositions = currentPositionsFromStart;
+                    nextFinalPositions = finalPositionsFromStart;
+                    oppositeFinalPositions = finalPositionsFromEnd;
+                    sProcessFrom = "start";
+                }
+                else
+                {
+                    nextPQ = pqFromEnd;
+                    nextToProcessPriority = nextToProcessEndPriority;
+                    nextCurrentPositions = currentPositionsFromEnd;
+                    nextFinalPositions = finalPositionsFromEnd;
+                    oppositeFinalPositions = finalPositionsFromStart;
+                    sProcessFrom = "end";
+                }
                 CubePriorityNode? cpn;
                 while (true)
                 {
-                    if (!pqFromStart.TryPeek(out cpn, out int iCPNPriority))
+                    if (!nextPQ.TryPeek(out cpn, out int iCPNPriority))
                     {
                         return null;
                     }
-                    if (iCPNPriority == nextToProcessStartPriority)
+                    if (iCPNPriority == nextToProcessPriority)
                     {
-                        CubePriorityNode cpn2 = pqFromStart.Dequeue();
+                        CubePriorityNode cpn2 = nextPQ.Dequeue();
                         BigInteger txNumber = cpn2.TransformationNumber;
                         working.SetFromTransformationNumber(txNumber, reverseColorValues);
-                        finalPositionsFromStart[txNumber] = nextToProcessStartPriority;
-                        currentPositionsFromStart.Remove(txNumber);
-                        if (finalPositionsFromEnd.ContainsKey(txNumber))
+                        nextFinalPositions[txNumber] = nextToProcessPriority;
+                        nextCurrentPositions.Remove(txNumber);
+                        if (oppositeFinalPositions.ContainsKey(txNumber))
                         {
                             if (!foundPathFromStart.HasValue)
                             {
-                                foundPathFromStart = nextToProcessStartPriority;
-                                foundPathFromEnd = finalPositionsFromEnd[txNumber] - 1;
+                                if (processFromStart)
+                                {
+                                    foundPathFromStart = nextToProcessStartPriority;
+                                    foundPathFromEnd = processedEndPriority.Value;
+                                }
+                                else
+                                {
+                                    foundPathFromStart = processedStartPriority.Value;
+                                    foundPathFromEnd = nextToProcessEndPriority;
+                                }
                             }
                         }
                         else
@@ -443,80 +477,34 @@ namespace _2x2
                                     working.SetFromTransformationNumber(txNumber, reverseColorValues);
                                 }
                                 working.PerformFaceRotation(nextRotationMove);
-                                ProcessNextRotation(working, working2, colorValues, finalPositionsFromStart, currentPositionsFromStart, iCPNPriority, pqFromStart, colorFlips);
+                                ProcessNextRotation(working, working2, colorValues, nextFinalPositions, nextCurrentPositions, iCPNPriority, nextPQ, colorFlips);
                             }
                         }
                     }
                     else
                     {
-                        processedStartPriority = nextToProcessStartPriority;
-                        Console.Out.WriteLine($"Finished priority {nextToProcessStartPriority} from start with {currentPositionsFromStart.Count} positions.");
-                        if (!foundPathFromStart.HasValue)
+                        if (processFromStart)
                         {
-                            nextToProcessStartPriority++;
-                        }
-                        break;
-                    }
-                }
-                if (foundPathFromStart.HasValue)
-                {
-                    break;
-                }
-
-                //process the next level of positions reached from the finish point
-                while (true)
-                {
-                    if (!pqFromEnd.TryPeek(out cpn, out int iCPNPriority))
-                    {
-                        return null;
-                    }
-                    if (iCPNPriority == nextToProcessEndPriority)
-                    {
-                        CubePriorityNode cpn2 = pqFromEnd.Dequeue();
-                        BigInteger txNumber = cpn2.TransformationNumber;
-                        working.SetFromTransformationNumber(txNumber, reverseColorValues);
-                        finalPositionsFromEnd[txNumber] = nextToProcessEndPriority;
-                        currentPositionsFromEnd.Remove(txNumber);
-                        if (finalPositionsFromStart.ContainsKey(txNumber))
-                        {
-                            if (!foundPathFromStart.HasValue)
-                            {
-                                foundPathFromStart = finalPositionsFromEnd[txNumber] - 1;
-                                foundPathFromEnd = nextToProcessEndPriority;
-                            }
+                            processedStartPriority = nextToProcessStartPriority;
                         }
                         else
                         {
-                            bool first = true;
-                            foreach (FaceRotation nextRotationMove in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
-                            {
-                                if (first)
-                                {
-                                    first = false;
-                                }
-                                else
-                                {
-                                    working.SetFromTransformationNumber(txNumber, reverseColorValues);
-                                }
-                                working.PerformFaceRotation(nextRotationMove);
-                                ProcessNextRotation(working, working2, colorValues, finalPositionsFromEnd, currentPositionsFromEnd, iCPNPriority, pqFromEnd, colorFlips);
-                            }
+                            processedEndPriority = nextToProcessEndPriority;
                         }
-                    }
-                    else
-                    {
-                        processedEndPriority = nextToProcessEndPriority;
-                        Console.Out.WriteLine($"Finished priority {nextToProcessEndPriority} from end with {currentPositionsFromEnd.Count} positions.");
+                        Console.Out.WriteLine($"Finished priority {nextToProcessPriority} from {sProcessFrom} with {nextCurrentPositions.Count} positions.");
                         if (!foundPathFromStart.HasValue)
                         {
-                            nextToProcessEndPriority++;
+                            if (processFromStart)
+                            {
+                                nextToProcessStartPriority++;
+                            }
+                            else
+                            {
+                                nextToProcessEndPriority++;
+                            }
                         }
                         break;
                     }
-                }
-                if (foundPathFromStart.HasValue)
-                {
-                    break;
                 }
             }
 
@@ -540,7 +528,7 @@ namespace _2x2
                             BigInteger nextPositionNumber = working.GetLowestTransformationNumber(working2, colorValues, colorFlips);
                             if (finalPositionsFromEnd.TryGetValue(nextPositionNumber, out int foundFinalPositionNumber))
                             {
-                                if (foundFinalPositionNumber == finalEndPriority & !nextPriorityPositions.Contains(next.Key))
+                                if (foundFinalPositionNumber == (finalEndPriority - 1) & !nextPriorityPositions.Contains(next.Key))
                                 {
                                     nextPriorityPositions.Add(next.Key);
                                 }
@@ -572,7 +560,7 @@ namespace _2x2
                 }
 
                 int nextPositionPriority = finalStartPriority;
-                for (int i = finalEndPriority; i >= 0; i--)
+                for (int i = finalEndPriority - 1; i >= 0; i--)
                 {
                     nextPositionPriority++;
                     ret[nextPositionPriority] = new HashSet<BigInteger>();
