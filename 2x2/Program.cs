@@ -11,6 +11,7 @@ namespace _2x2
             MetricType mt = MetricType.MaxRUL;
             bool skipMirrors = false;
             bool bidirectionalSearch = true;
+            int maxPruneCount = int.MaxValue;
             List<StandardPatterns> patternsToCheck = GetStandardPatternsToCheck();
             bool first = true;
             foreach (StandardPatterns nextPattern in patternsToCheck)
@@ -22,14 +23,14 @@ namespace _2x2
                 Console.Out.WriteLine($"-----------Processing {nextPattern} Regular----------");
                 GetSolutions(nextPattern, true, true, true);
                 GetSolutions(nextPattern, true, false, true);
-                GetBestSolutions(nextPattern, true, true, bidirectionalSearch, mt, skipMirrors);
-                GetBestSolutions(nextPattern, true, false, bidirectionalSearch, mt, skipMirrors);
+                GetBestSolutions(nextPattern, true, true, bidirectionalSearch, mt, skipMirrors, maxPruneCount);
+                GetBestSolutions(nextPattern, true, false, bidirectionalSearch, mt, skipMirrors, maxPruneCount);
                 Console.Out.WriteLine();
                 Console.Out.WriteLine($"-----------Processing {nextPattern} Ortega----------");
                 GetSolutions(nextPattern, false, true, true);
                 GetSolutions(nextPattern, false, false, true);
-                GetBestSolutions(nextPattern, false, true, bidirectionalSearch, mt, skipMirrors);
-                GetBestSolutions(nextPattern, false, false, bidirectionalSearch, mt, skipMirrors);
+                GetBestSolutions(nextPattern, false, true, bidirectionalSearch, mt, skipMirrors, maxPruneCount);
+                GetBestSolutions(nextPattern, false, false, bidirectionalSearch, mt, skipMirrors, maxPruneCount);
             }
             Console.Out.WriteLine("Done!");
             Console.ReadKey();
@@ -48,7 +49,7 @@ namespace _2x2
             };
         }
 
-        static void GetBestSolutions(StandardPatterns topPattern, bool bottomSolved, bool countOnly, bool bidirectionalSearch, MetricType metricType, bool skipMirrors)
+        static void GetBestSolutions(StandardPatterns topPattern, bool bottomSolved, bool countOnly, bool bidirectionalSearch, MetricType metricType, bool skipMirrors, int maxPruneCount)
         {
             TwoByTwo start = new TwoByTwo(topPattern);
             TwoByTwo finish = new TwoByTwo(StandardPatterns.UpComplete);
@@ -59,7 +60,7 @@ namespace _2x2
             }
             Console.Out.WriteLine();
             Console.Out.WriteLine($"Bottom solved={bottomSolved} countOnly={countOnly}");
-            TwoByTwo.FindSequences(start, finish, true, false, countOnly, bidirectionalSearch, metricType, skipMirrors);
+            TwoByTwo.FindSequences(start, finish, true, false, countOnly, bidirectionalSearch, metricType, skipMirrors, maxPruneCount);
         }
 
         static void GetSolutions(StandardPatterns topPattern, bool bottomSolved, bool includeHalfRotations, bool bidirectionalSearch)
@@ -73,7 +74,7 @@ namespace _2x2
             }
             Console.Out.WriteLine();
             Console.Out.WriteLine($"Bottom solved={bottomSolved} includeHalf={includeHalfRotations}");
-            TwoByTwo.FindSequences(start, finish, false, includeHalfRotations, true, bidirectionalSearch, MetricType.MinimizeRotationsBeyondTwoFaces, true);
+            TwoByTwo.FindSequences(start, finish, false, includeHalfRotations, true, bidirectionalSearch, MetricType.MinimizeRotationsBeyondTwoFaces, true, 0);
         }
     }
 
@@ -129,7 +130,7 @@ namespace _2x2
     {
         public static bool ALLOW_CUBE_ROTATION_TRANSFORMATIONS = true;
 
-        public static void FindSequences(TwoByTwo start, TwoByTwo finish, bool allCombinations, bool includeHalfRotations, bool countOnly, bool bidirectionalSearch, MetricType metricType, bool skipMirrors)
+        public static void FindSequences(TwoByTwo start, TwoByTwo finish, bool allCombinations, bool includeHalfRotations, bool countOnly, bool bidirectionalSearch, MetricType metricType, bool skipMirrors, int maxPruneCount)
         {
             TwoByTwo working = new TwoByTwo(start);
             TwoByTwo working2 = new TwoByTwo(start);
@@ -168,7 +169,13 @@ namespace _2x2
                     BigInteger startExactValue = start.GetTransformationNumber(colorValues);
 
                     PositionTree pt = new PositionTree(startExactValue, startLowestTransformationNumber, null, null);
-                    ProcessPositionTree(pt, 0, finishPriorityValue, goodSequencePositions, working, working2, colorValues, reverseColorValues, colorFlips, allCombinations, includeHalfRotations);
+                    bool foundSequence = ProcessPositionTree(pt, 0, finishPriorityValue, goodSequencePositions, working, working2, colorValues, reverseColorValues, colorFlips, allCombinations, includeHalfRotations, 0, maxPruneCount, metricType);
+
+                    if (!foundSequence)
+                    {
+                        Console.Out.WriteLine("All sequences pruned.");
+                        return;
+                    }
 
                     //obtain all the sequences
                     List<CubeSequence> cubeSequences = new List<CubeSequence>();
@@ -865,11 +872,35 @@ namespace _2x2
             }
         }
 
-        private static void ProcessPositionTree(PositionTree pt, int currentPriority, int finishPriority, Dictionary<int, HashSet<BigInteger>> goodSequencePositions, TwoByTwo working, TwoByTwo working2, Dictionary<FaceColor, BigInteger> colorValues, Dictionary<BigInteger, FaceColor> reverseColorValues, List<Dictionary<FaceColor, FaceColor>> colorFlips, bool allCombinations, bool includeHalfRotations)
+        private static bool ProcessPositionTree(PositionTree pt, int currentPriority, int finishPriority, Dictionary<int, HashSet<BigInteger>> goodSequencePositions, TwoByTwo working, TwoByTwo working2, Dictionary<FaceColor, BigInteger> colorValues, Dictionary<BigInteger, FaceColor> reverseColorValues, List<Dictionary<FaceColor, FaceColor>> colorFlips, bool allCombinations, bool includeHalfRotations, int currentPruneCount, int maxPruneCount, MetricType metricType)
         {
+            List<PositionTree>? nextPositions = null;
+            bool ret = false;
             HashSet<BigInteger>? foundBestPositions = allCombinations ? null : new HashSet<BigInteger>();
             foreach (FaceRotation nextRotation in FaceRotation.EnumerateFaceRotations(includeHalfRotations))
             {
+                CubeFace cf = nextRotation.Face;
+                bool isPruneRotation = false;
+                if (metricType == MetricType.MaxRU)
+                {
+                    isPruneRotation = cf != CubeFace.Right && cf != CubeFace.Up;
+                }
+                else if (metricType == MetricType.MaxRUL)
+                {
+                    isPruneRotation = cf != CubeFace.Right && cf != CubeFace.Up && cf != CubeFace.Left;
+                }
+                int nextPruneCount = currentPruneCount;
+                if (isPruneRotation)
+                {
+                    if (currentPruneCount == maxPruneCount) //stop processing if beyond the prune count
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        nextPruneCount++;
+                    }
+                }
                 working.SetFromTransformationNumber(pt.ExactTransformationValue, reverseColorValues);
                 working.PerformFaceRotation(nextRotation);
                 BigInteger afterTransformationNumber = working.GetLowestTransformationNumber(working2, colorValues, colorFlips);
@@ -878,13 +909,24 @@ namespace _2x2
                     BigInteger afterExactValue = working.GetTransformationNumber(colorValues);
                     if (foundBestPositions != null) foundBestPositions.Add(afterTransformationNumber);
                     PositionTree nextPT = new PositionTree(afterExactValue, afterTransformationNumber, pt, nextRotation);
-                    pt.NextPositions.Add(nextPT);
+                    bool nextPositionRet = false;
                     if (currentPriority + 1 < finishPriority)
+                        nextPositionRet = ProcessPositionTree(nextPT, currentPriority + 1, finishPriority, goodSequencePositions, working, working2, colorValues, reverseColorValues, colorFlips, allCombinations, includeHalfRotations, nextPruneCount, maxPruneCount, metricType);
+                    else
+                        nextPositionRet = true;
+                    if (nextPositionRet)
                     {
-                        ProcessPositionTree(nextPT, currentPriority + 1, finishPriority, goodSequencePositions, working, working2, colorValues, reverseColorValues, colorFlips, allCombinations, includeHalfRotations);
+                        if (nextPositions == null) nextPositions = new List<PositionTree>();
+                        nextPositions.Add(nextPT);
+                        ret = true;
                     }
                 }
             }
+            if (ret)
+            {
+                pt.NextPositions.AddRange(nextPositions);
+            }
+            return ret;
         }
 
         public class CubeSequence : IComparable<CubeSequence>
